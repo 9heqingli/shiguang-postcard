@@ -1,0 +1,591 @@
+import {
+  analyzeImage,
+  defaultCopy,
+  loadImageFile,
+  PAPERS,
+  PAPER_ORDER,
+  pickSymbols,
+} from "./analysis.js";
+import { renderPoster, specFor } from "./compose.js";
+import { drawSymbolInk } from "./ink.js";
+import { buildPrompt } from "./prompt.js";
+import { SYMBOLS, SYMBOL_KEYS } from "./symbols.js";
+
+const $ = (sel) => document.querySelector(sel);
+const canvas = $("#poster");
+const fileInput = $("#fileInput");
+const cameraInput = $("#cameraInput");
+
+const state = {
+  img: null,
+  url: null,
+  fileName: "",
+  analysis: null,
+  layoutChoice: "auto",
+  layout: "top-bottom",
+  paper: "oatmeal",
+  ink: "#7F0019",
+  inkName: "MUJI 红",
+  inkNameEn: "MUJI deep red",
+  symbols: [],
+  text: {
+    kicker: "POCKET ARCHIVE",
+    title: "A QUIET MOMENT",
+    subtitle: "",
+    place: "HERE / 此地",
+    date: "",
+    code: "NO. 001",
+  },
+  seed: Math.floor(Math.random() * 100000),
+  scale: 2,
+  meta: null,
+};
+
+const INKS = [
+  { hex: "#7F0019", name: "MUJI 红", en: "MUJI deep red" },
+  { hex: "#8E2632", name: "胭脂", en: "rouge red" },
+  { hex: "#8C3428", name: "朱砂", en: "cinnabar red" },
+  { hex: "#734029", name: "赭石", en: "ochre brown" },
+  { hex: "#4E3B5C", name: "黛紫", en: "dusty violet" },
+  { hex: "#1F5B6B", name: "石青", en: "mineral blue" },
+  { hex: "#2D4671", name: "藏青", en: "navy blue" },
+  { hex: "#3F5641", name: "竹青", en: "bamboo green" },
+  { hex: "#41474C", name: "墨灰", en: "ink gray" },
+  { hex: "#302D2B", name: "玄色", en: "charcoal black" },
+];
+
+let renderQueued = false;
+let renderPending = false;
+let toastTimer = null;
+let inputTimer = null;
+
+function toast(message, ms = 2400) {
+  const el = $("#toast");
+  el.textContent = message;
+  el.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("on"), ms);
+}
+
+function setBusy(on) {
+  document.body.classList.toggle("busy", on);
+}
+
+function autoLayout(analysis) {
+  if (analysis.orientation === "portrait") return "left-right";
+  if (analysis.orientation === "square" && analysis.tags.includes("portrait")) return "left-right";
+  return "top-bottom";
+}
+
+/* ----------------------------------------------------------------------- */
+/* Controls                                                                */
+/* ----------------------------------------------------------------------- */
+
+function buildPaperControl() {
+  const wrap = $("#paperControl");
+  wrap.innerHTML = "";
+  for (const key of PAPER_ORDER) {
+    const paper = PAPERS[key];
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "swatch" + (key === state.paper ? " on" : "");
+    btn.dataset.paper = key;
+    btn.innerHTML = `<i style="--sw:${paper.base}"></i><span>${paper.name}</span>`;
+    btn.addEventListener("click", () => {
+      state.paper = key;
+      wrap.querySelectorAll(".swatch").forEach((el) => el.classList.toggle("on", el.dataset.paper === key));
+      $("#paperHint").textContent = paper.name;
+      scheduleRender();
+    });
+    wrap.appendChild(btn);
+  }
+}
+
+function buildInkControl() {
+  const wrap = $("#inkControl");
+  wrap.innerHTML = "";
+  for (const ink of INKS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ink-chip" + (ink.hex === state.ink ? " on" : "");
+    btn.dataset.ink = ink.hex;
+    btn.title = `${ink.name} · ${ink.hex}`;
+    btn.setAttribute("aria-label", `${ink.name}，${ink.hex}`);
+    btn.setAttribute("aria-pressed", String(ink.hex === state.ink));
+    btn.innerHTML = `<i style="--c:${ink.hex}"></i><span>${ink.name}</span>`;
+    btn.addEventListener("click", () => {
+      state.ink = ink.hex;
+      state.inkName = ink.name;
+      state.inkNameEn = ink.en;
+      wrap.querySelectorAll(".ink-chip").forEach((el) => {
+        const on = el.dataset.ink === ink.hex;
+        el.classList.toggle("on", on);
+        el.setAttribute("aria-pressed", String(on));
+      });
+      $("#inkHint").textContent = ink.name;
+      scheduleRender();
+    });
+    wrap.appendChild(btn);
+  }
+  const current = INKS.find((ink) => ink.hex === state.ink) || INKS[0];
+  $("#inkHint").textContent = current.name;
+}
+
+function updatePaperUI() {
+  document.querySelectorAll(".swatch").forEach((el) => el.classList.toggle("on", el.dataset.paper === state.paper));
+  $("#paperHint").textContent = PAPERS[state.paper]?.name || "燕麦纸";
+}
+
+function updateLayoutUI() {
+  document.querySelectorAll("#layoutControl button").forEach((el) => {
+    el.classList.toggle("on", el.dataset.layout === state.layoutChoice);
+  });
+  const name = state.layout === "left-right" ? "左图右文" : "上图下文";
+  $("#layoutHint").textContent = state.layoutChoice === "auto" ? `自动 · ${name}` : name;
+}
+
+function fillTextFields() {
+  $("#titleInput").value = state.text.title || "";
+  $("#subtitleInput").value = state.text.subtitle || "";
+  $("#placeInput").value = state.text.place || "";
+  $("#dateInput").value = state.text.date || "";
+}
+
+function previewCanvas(key, size, seed) {
+  const c = document.createElement("canvas");
+  c.width = size * 2;
+  c.height = size * 2;
+  const g = c.getContext("2d");
+  g.fillStyle = PAPERS[state.paper]?.base || "#d8cebd";
+  g.fillRect(0, 0, c.width, c.height);
+  drawSymbolInk(g, key, { x: size * 0.08, y: size * 0.08, w: size * 0.84, h: size * 0.84 }, seed, 2);
+  return c;
+}
+
+function renderSymbolGrid() {
+  const grid = $("#symbolGrid");
+  grid.innerHTML = "";
+  state.symbols.forEach((symbol, index) => {
+    const def = SYMBOLS[symbol.key];
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "symbol-chip on";
+    btn.title = `移除「${def?.zh || symbol.key}」`;
+    const c = previewCanvas(symbol.key, 76, symbol.seed ?? index + 3);
+    btn.appendChild(c);
+    const name = document.createElement("span");
+    name.className = "chip-name";
+    name.textContent = def?.zh || symbol.key;
+    btn.appendChild(name);
+    const x = document.createElement("span");
+    x.className = "chip-x";
+    x.textContent = "×";
+    btn.appendChild(x);
+    btn.addEventListener("click", () => {
+      if (state.symbols.length <= 1) {
+        toast("至少保留一枚符号");
+        return;
+      }
+      state.symbols = state.symbols.filter((s) => s !== symbol);
+      renderSymbolGrid();
+      scheduleRender();
+    });
+    grid.appendChild(btn);
+  });
+  if (state.symbols.length < 8) {
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "symbol-chip symbol-add";
+    add.title = "从符号库添加";
+    add.innerHTML = `<span class="add-plus">+</span><span class="add-label">添加</span>`;
+    add.addEventListener("click", openLibrary);
+    grid.appendChild(add);
+  }
+  $("#symbolCount").textContent = String(state.symbols.length);
+  updateLibraryAdded();
+}
+
+function openLibrary() {
+  const dialog = $("#libraryDialog");
+  const grid = $("#libraryGrid");
+  if (!grid.childElementCount) {
+    SYMBOL_KEYS.forEach((key) => {
+      const def = SYMBOLS[key];
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "lib-item";
+      btn.dataset.key = key;
+      btn.appendChild(previewCanvas(key, 64, 29 + SYMBOL_KEYS.indexOf(key) * 3));
+      const span = document.createElement("span");
+      span.textContent = def.zh;
+      btn.appendChild(span);
+      btn.addEventListener("click", () => {
+        if (state.symbols.length >= 8) {
+          toast("最多 8 枚符号，先去掉一枚吧");
+          return;
+        }
+        if (state.symbols.some((s) => s.key === key)) return;
+        const base = state.symbols.find((s) => s.primary)?.weight ?? 1;
+        state.symbols.push({
+          key,
+          seed: Math.floor(Math.random() * 1e9),
+          weight: Math.max(0.45, base * 0.62),
+          confidence: 0.3,
+          primary: false,
+        });
+        renderSymbolGrid();
+        scheduleRender();
+        toast(`已加入「${def.zh}」`);
+      });
+      grid.appendChild(btn);
+    });
+  }
+  updateLibraryAdded();
+  dialog.showModal();
+}
+
+function updateLibraryAdded() {
+  document.querySelectorAll(".lib-item").forEach((el) => {
+    el.classList.toggle("added", state.symbols.some((s) => s.key === el.dataset.key));
+  });
+}
+
+function updateMeta() {
+  if (!state.analysis) return;
+  const spec = specFor(state.analysis, state.layout);
+  const n = state.symbols.length;
+  $("#stageBar").hidden = false;
+  $("#analysisStrip").hidden = false;
+  $("#metaLayout").textContent = spec.name;
+  $("#metaSize").textContent = `${spec.w * state.scale} × ${spec.h * state.scale}`;
+  $("#metaPaper").textContent = PAPERS[state.paper]?.name || "";
+  $("#analysisStrip").innerHTML =
+    `<span>SCENE <b>${state.analysis.sceneLabel}</b></span><i></i>` +
+    `<span>${n} SYMBOLS</span><i></i>` +
+    `<span>${PAPERS[state.paper]?.name || ""}</span><i></i>` +
+    `<span>LOCAL RENDER</span>`;
+  $("#exportHint").textContent = `${spec.w * state.scale} px 长边`;
+  $("#sourceDims").textContent = `${state.analysis.width} × ${state.analysis.height}`;
+}
+
+function scheduleRender() {
+  if (!state.analysis) return;
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    if (renderPending) return;
+    renderPending = true;
+    setBusy(true);
+    try {
+      state.meta = renderPoster(canvas, state);
+      canvas.classList.remove("is-empty");
+      updateMeta();
+    } catch (err) {
+      console.error(err);
+      toast("生成时出了点问题，请换一张照片试试");
+    } finally {
+      renderPending = false;
+      setBusy(false);
+    }
+  });
+}
+
+/* ----------------------------------------------------------------------- */
+/* Photo intake                                                            */
+/* ----------------------------------------------------------------------- */
+
+async function handleFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    toast("请选择一张图片文件");
+    return;
+  }
+  if (file.size > 40 * 1024 * 1024) {
+    toast("图片有点大，请选择 40MB 以内的照片");
+    return;
+  }
+  setBusy(true);
+  try {
+    const { img, url } = await loadImageFile(file);
+    if (state.url) URL.revokeObjectURL(state.url);
+    state.img = img;
+    state.url = url;
+    state.fileName = file.name || "camera.jpg";
+    state.analysis = analyzeImage(img);
+    state.layoutChoice = "auto";
+    state.layout = autoLayout(state.analysis);
+    state.paper = state.analysis.paper;
+    state.ink = "#7F0019";
+    state.inkName = "MUJI 红";
+    state.inkNameEn = "MUJI deep red";
+    state.seed = Math.floor(Math.random() * 100000);
+    state.symbols = pickSymbols(state.analysis, state.seed);
+    state.text = defaultCopy(state.analysis);
+
+    $("#emptyState").hidden = true;
+    $("#introBlock").hidden = true;
+    $("#editor").hidden = false;
+    $("#sourceImg").src = url;
+    $("#sourceName").textContent = state.fileName;
+    $("#sourceDims").textContent = `${state.analysis.width} × ${state.analysis.height}`;
+
+    buildPaperControl();
+    buildInkControl();
+    updatePaperUI();
+    updateLayoutUI();
+    fillTextFields();
+    renderSymbolGrid();
+    scheduleRender();
+    updateMeta();
+
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      $("#stage").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  } catch (err) {
+    console.error(err);
+    toast(err.message || "这张图片读不出来，换一张试试");
+  } finally {
+    setBusy(false);
+  }
+}
+
+function pickFile() {
+  fileInput.value = "";
+  fileInput.click();
+}
+
+function shoot() {
+  cameraInput.value = "";
+  cameraInput.click();
+}
+
+function reset() {
+  if (state.url) URL.revokeObjectURL(state.url);
+  state.img = null;
+  state.url = null;
+  state.analysis = null;
+  state.symbols = [];
+  state.text = { kicker: "POCKET ARCHIVE", title: "", subtitle: "", place: "HERE / 此地", date: "", code: "" };
+  canvas.classList.add("is-empty");
+  $("#emptyState").hidden = false;
+  $("#editor").hidden = true;
+  $("#introBlock").hidden = false;
+  $("#stageBar").hidden = true;
+  $("#analysisStrip").hidden = true;
+  $("#libraryGrid").innerHTML = "";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+/* ----------------------------------------------------------------------- */
+/* Export                                                                  */
+/* ----------------------------------------------------------------------- */
+
+function download() {
+  if (!state.analysis) {
+    toast("先选一张照片吧");
+    return;
+  }
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      toast("导出失败，请再试一次");
+      return;
+    }
+    const stamp = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const name = `拾光明信片-${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}-${pad(
+      stamp.getHours()
+    )}${pad(stamp.getMinutes())}.png`;
+    const a = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    toast("明信片已保存");
+  }, "image/png");
+}
+
+async function copyPrompt() {
+  if (!state.analysis) {
+    toast("先选一张照片吧");
+    return;
+  }
+  const prompt = buildPrompt(state, state.analysis, state.meta);
+  try {
+    await navigator.clipboard.writeText(prompt);
+    toast("Prompt 已复制，可交给图像模型再生成一版");
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = prompt;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+      toast("Prompt 已复制");
+    } catch {
+      toast("复制失败，请手动选择文本");
+    }
+    ta.remove();
+  }
+}
+
+/* ----------------------------------------------------------------------- */
+/* Wiring                                                                  */
+/* ----------------------------------------------------------------------- */
+
+$("#pickBtn").addEventListener("click", pickFile);
+$("#emptyPickBtn").addEventListener("click", pickFile);
+$("#cameraBtn").addEventListener("click", shoot);
+$("#emptyCameraBtn").addEventListener("click", shoot);
+$("#replaceBtn").addEventListener("click", pickFile);
+fileInput.addEventListener("change", () => handleFile(fileInput.files[0]));
+cameraInput.addEventListener("change", () => handleFile(cameraInput.files[0]));
+
+$("#layoutControl").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-layout]");
+  if (!btn) return;
+  state.layoutChoice = btn.dataset.layout;
+  state.layout = state.layoutChoice === "auto" ? autoLayout(state.analysis) : state.layoutChoice;
+  updateLayoutUI();
+  scheduleRender();
+});
+
+$("#resampleBtn").addEventListener("click", () => {
+  if (!state.analysis) return;
+  state.seed = (state.seed + 7919) % 1000000;
+  state.symbols = pickSymbols(state.analysis, state.seed);
+  renderSymbolGrid();
+  scheduleRender();
+  toast(`重新拾取了 ${state.symbols.length} 枚符号`);
+});
+
+$("#shuffleBtn").addEventListener("click", () => {
+  if (!state.analysis) return;
+  state.seed = (state.seed + 3571) % 1000000;
+  state.symbols = pickSymbols(state.analysis, state.seed);
+  renderSymbolGrid();
+  scheduleRender();
+  toast("换了一组取样与排布");
+});
+
+$("#libraryBtn").addEventListener("click", openLibrary);
+$("#downloadBtn").addEventListener("click", download);
+$("#stageDownloadBtn").addEventListener("click", download);
+$("#promptBtn").addEventListener("click", copyPrompt);
+$("#resetBtn").addEventListener("click", reset);
+$("#helpBtn").addEventListener("click", () => $("#helpDialog").showModal());
+
+document.querySelectorAll("dialog [data-close]").forEach((btn) => {
+  btn.addEventListener("click", () => btn.closest("dialog").close());
+});
+
+document.querySelectorAll("dialog").forEach((dialog) => {
+  dialog.addEventListener("click", (e) => {
+    if (e.target === dialog) dialog.close();
+  });
+});
+
+const bindText = (id, key) => {
+  const el = $(id);
+  el.addEventListener("input", () => {
+    state.text[key] = el.value;
+    clearTimeout(inputTimer);
+    inputTimer = setTimeout(scheduleRender, 140);
+  });
+};
+bindText("#titleInput", "title");
+bindText("#subtitleInput", "subtitle");
+bindText("#placeInput", "place");
+bindText("#dateInput", "date");
+
+// drag & drop anywhere on the stage
+const dropFrame = $("#dropFrame");
+["dragenter", "dragover"].forEach((ev) => {
+  document.addEventListener(ev, (e) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    dropFrame?.classList.add("drag");
+  });
+});
+["dragleave", "drop"].forEach((ev) => {
+  document.addEventListener(ev, (e) => {
+    if (ev === "dragleave" && e.relatedTarget) return;
+    dropFrame?.classList.remove("drag");
+  });
+});
+document.addEventListener("drop", (e) => {
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return;
+  e.preventDefault();
+  handleFile(file);
+});
+
+document.addEventListener("paste", (e) => {
+  const items = [...(e.clipboardData?.items || [])];
+  const item = items.find((i) => i.type.startsWith("image/"));
+  if (item) {
+    e.preventDefault();
+    handleFile(item.getAsFile());
+  }
+});
+
+// initial UI
+canvas.classList.add("is-empty");
+buildPaperControl();
+buildInkControl();
+
+window.__shiguang = { state, handleFile, scheduleRender, renderPoster };
+
+const demo = new URLSearchParams(location.search).get("demo");
+if (demo) {
+  fetch(demo)
+    .then((r) => {
+      if (!r.ok) throw new Error("demo not found");
+      return r.blob();
+    })
+    .then((blob) => {
+      const ext = blob.type.split("/")[1] || "jpg";
+      handleFile(new File([blob], `demo.${ext}`, { type: blob.type }));
+    })
+    .catch(() => {});
+}
+
+if (new URLSearchParams(location.search).has("debug")) {
+  const timer = setInterval(() => {
+    if (!state.analysis) return;
+    clearInterval(timer);
+    const pre = document.createElement("pre");
+    pre.id = "debugOut";
+    pre.style.display = "none";
+    pre.textContent = JSON.stringify(
+      {
+        orientation: state.analysis.orientation,
+        tags: state.analysis.tags,
+        scene: state.analysis.sceneLabel,
+        time: state.analysis.timeOfDay,
+        stats: state.analysis.stats,
+        palette: state.analysis.palette.map((p) => ({ hex: p.hex, w: +p.weight.toFixed(3), h: Math.round(p.h) })),
+        regions: state.analysis.regions.map((r) => ({
+          area: +r.area.toFixed(3),
+          aspect: +r.aspect.toFixed(2),
+          h: Math.round(r.h),
+          s: +r.s.toFixed(2),
+          v: +r.v.toFixed(2),
+          cx: +r.cx.toFixed(2),
+          cy: +r.cy.toFixed(2),
+          salience: +r.salience.toFixed(2),
+          candidates: r.candidates.map((c) => [c.key, +c.score.toFixed(2)]),
+        })),
+        symbols: state.symbols.map((s) => [s.key, +s.weight.toFixed(2)]),
+      },
+      null,
+      1
+    );
+    document.body.appendChild(pre);
+  }, 300);
+}
