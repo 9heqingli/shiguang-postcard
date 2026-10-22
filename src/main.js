@@ -9,6 +9,7 @@ import {
 import { renderPoster, specFor } from "./compose.js";
 import { drawSymbolInk } from "./ink.js";
 import { buildPrompt } from "./prompt.js";
+import { makeWorld } from "./secondWorld.js";
 import { SYMBOLS, SYMBOL_KEYS } from "./symbols.js";
 
 const $ = (sel) => document.querySelector(sel);
@@ -26,6 +27,7 @@ const state = {
   analysis: null,
   layoutChoice: "auto",
   layout: "top-bottom",
+  style: "healing",
   paper: "oatmeal",
   ink: "#7F0019",
   inkName: "MUJI 红",
@@ -38,8 +40,11 @@ const state = {
     place: "HERE / 此地",
     date: "",
     code: "NO. 001",
+    caption: "",
   },
   seed: Math.floor(Math.random() * 100000),
+  worldSeed: 0,
+  world: null,
   scale: EXPORT_SCALE,
   previewScale: PREVIEW_SCALE,
   exportScale: EXPORT_SCALE,
@@ -63,6 +68,7 @@ let renderTimer = null;
 let renderDeferred = false;
 let renderPending = false;
 let exportInProgress = false;
+let scrollStageAfterRender = false;
 let toastTimer = null;
 let inputTimer = null;
 
@@ -151,9 +157,58 @@ function updateLayoutUI() {
   $("#layoutHint").textContent = state.layoutChoice === "auto" ? `自动 · ${name}` : name;
 }
 
+function updateStyleUI() {
+  const second = state.style === "second-world";
+  document.querySelectorAll("[data-style]").forEach((el) => {
+    const on = el.dataset.style === state.style;
+    el.classList.toggle("on", on);
+    el.setAttribute("aria-pressed", String(on));
+  });
+  $("#styleHint").textContent = second ? "3:4 摄影二创" : "照片与居中的纸";
+  $("#layoutBlock").hidden = second;
+  $("#symbolBlock").hidden = second;
+  $("#inkBlock").hidden = second;
+  $("#worldBlock").hidden = !second;
+  $("#titleField").hidden = second;
+  $("#subtitleField").hidden = second;
+  $("#captionField").hidden = !second;
+  $("#worldHint").textContent = second ? `${state.world?.label || "一页小世界"} · ${state.world?.figureCount ?? 1} 位使用者` : "";
+  $("#worldDescription").textContent = second
+    ? "照片底部的结构继续延伸进纸里：水会变成可牵动的涟漪，山路会变成可攀折的脊线，光也会被借走一小段。"
+    : "";
+  $("#shuffleLabel").textContent = second ? "换一个世界" : "换一组";
+  $("#copyHint").textContent = second ? "一句英文旁白" : "可留空";
+}
+
+function ensureWorld(force = false) {
+  if (!state.analysis) return;
+  if (!force && state.world) return;
+  const previous = state.world;
+  state.worldSeed = force ? state.worldSeed + 1 : state.worldSeed;
+  state.world = makeWorld(state.analysis, state.seed + state.worldSeed * 1031);
+  if (!state.text.caption || state.text.caption === previous?.caption) {
+    state.text.caption = state.world.caption;
+  }
+}
+
+function applyStyle(style) {
+  if (style !== "healing" && style !== "second-world") return;
+  state.style = style;
+  if (style === "second-world" && state.analysis) {
+    ensureWorld();
+    if (!state.text.caption) state.text.caption = state.world.caption;
+    fillTextFields();
+  }
+  scrollStageAfterRender = Boolean(state.analysis && window.matchMedia("(max-width: 900px)").matches);
+  updateStyleUI();
+  updateMeta();
+  scheduleRender({ immediate: true });
+}
+
 function fillTextFields() {
   $("#titleInput").value = state.text.title || "";
   $("#subtitleInput").value = state.text.subtitle || "";
+  $("#captionInput").value = state.text.caption || "";
   $("#placeInput").value = state.text.place || "";
   $("#dateInput").value = state.text.date || "";
 }
@@ -263,7 +318,8 @@ function updateLibraryAdded() {
 
 function updateMeta() {
   if (!state.analysis) return;
-  const spec = specFor(state.analysis, state.layout);
+  const second = state.style === "second-world";
+  const spec = specFor(state.analysis, state.layout, state.style);
   const n = state.symbols.length;
   $("#stageBar").hidden = false;
   $("#analysisStrip").hidden = false;
@@ -271,11 +327,15 @@ function updateMeta() {
   const exportScale = state.exportScale ?? state.scale ?? EXPORT_SCALE;
   $("#metaSize").textContent = `${spec.w * exportScale} × ${spec.h * exportScale}`;
   $("#metaPaper").textContent = PAPERS[state.paper]?.name || "";
-  $("#analysisStrip").innerHTML =
-    `<span>SCENE <b>${state.analysis.sceneLabel}</b></span><i></i>` +
-    `<span>${n} SYMBOLS</span><i></i>` +
-    `<span>${PAPERS[state.paper]?.name || ""}</span><i></i>` +
-    `<span>LOCAL RENDER</span>`;
+  $("#analysisStrip").innerHTML = second
+    ? `<span>STYLE <b>第二世界</b></span><i></i>` +
+      `<span>${state.world?.label || "一页小世界"}</span><i></i>` +
+      `<span>${PAPERS[state.paper]?.name || ""}</span><i></i>` +
+      `<span>LOCAL RENDER</span>`
+    : `<span>SCENE <b>${state.analysis.sceneLabel}</b></span><i></i>` +
+      `<span>${n} SYMBOLS</span><i></i>` +
+      `<span>${PAPERS[state.paper]?.name || ""}</span><i></i>` +
+      `<span>LOCAL RENDER</span>`;
   $("#exportHint").textContent = `${spec.w * exportScale} px 长边`;
   $("#sourceDims").textContent = `${state.analysis.width} × ${state.analysis.height}`;
 }
@@ -308,6 +368,12 @@ function runRender() {
     state.meta = renderPoster(canvas, state, { scale: PREVIEW_SCALE });
     canvas.classList.remove("is-empty");
     updateMeta();
+    if (scrollStageAfterRender) {
+      scrollStageAfterRender = false;
+      requestAnimationFrame(() => {
+        $("#stage").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
   } catch (err) {
     console.error(err);
     toast("生成时出了点问题，请换一张照片试试");
@@ -351,6 +417,9 @@ async function handleFile(file) {
     state.seed = Math.floor(Math.random() * 100000);
     state.symbols = pickSymbols(state.analysis, state.seed);
     state.text = defaultCopy(state.analysis);
+    state.worldSeed = 0;
+    state.world = makeWorld(state.analysis, state.seed);
+    state.text.caption = state.world.caption;
 
     $("#emptyState").hidden = true;
     $("#introBlock").hidden = true;
@@ -361,6 +430,7 @@ async function handleFile(file) {
 
     buildPaperControl();
     buildInkControl();
+    updateStyleUI();
     updatePaperUI();
     updateLayoutUI();
     fillTextFields();
@@ -369,7 +439,7 @@ async function handleFile(file) {
     updateMeta();
 
     if (window.matchMedia("(max-width: 900px)").matches) {
-      $("#stage").scrollIntoView({ behavior: "smooth", block: "start" });
+      scrollStageAfterRender = true;
     }
   } catch (err) {
     console.error(err);
@@ -395,7 +465,17 @@ function reset() {
   state.url = null;
   state.analysis = null;
   state.symbols = [];
-  state.text = { kicker: "POCKET ARCHIVE", title: "", subtitle: "", place: "HERE / 此地", date: "", code: "" };
+  state.world = null;
+  state.worldSeed = 0;
+  state.text = {
+    kicker: "POCKET ARCHIVE",
+    title: "",
+    subtitle: "",
+    place: "HERE / 此地",
+    date: "",
+    code: "",
+    caption: "",
+  };
   canvas.classList.add("is-empty");
   $("#emptyState").hidden = false;
   $("#editor").hidden = true;
@@ -519,11 +599,28 @@ $("#resampleBtn").addEventListener("click", () => {
 
 $("#shuffleBtn").addEventListener("click", () => {
   if (!state.analysis) return;
+  if (state.style === "second-world") {
+    ensureWorld(true);
+    fillTextFields();
+    scheduleRender({ immediate: true });
+    updateMeta();
+    toast("换了一个第二世界");
+    return;
+  }
   state.seed = (state.seed + 3571) % 1000000;
   state.symbols = pickSymbols(state.analysis, state.seed);
   renderSymbolGrid();
   scheduleRender();
   toast("换了一组取样与排布");
+});
+
+$("#worldShuffleBtn").addEventListener("click", () => {
+  if (!state.analysis) return;
+  ensureWorld(true);
+  fillTextFields();
+  scheduleRender({ immediate: true });
+  updateMeta();
+  toast("换了一个第二世界");
 });
 
 $("#libraryBtn").addEventListener("click", openLibrary);
@@ -564,8 +661,13 @@ const bindText = (id, key) => {
 };
 bindText("#titleInput", "title");
 bindText("#subtitleInput", "subtitle");
+bindText("#captionInput", "caption");
 bindText("#placeInput", "place");
 bindText("#dateInput", "date");
+
+document.querySelectorAll("[data-style]").forEach((btn) => {
+  btn.addEventListener("click", () => applyStyle(btn.dataset.style));
+});
 
 // drag & drop anywhere on the stage
 const dropFrame = $("#dropFrame");

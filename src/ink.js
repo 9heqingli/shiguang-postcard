@@ -3,6 +3,7 @@ import { mulberry32, drawSymbol, symbolAspect } from "./symbols.js";
 const TAU = Math.PI * 2;
 const spriteCache = new Map();
 const paperCache = new Map();
+const textCache = new Map();
 
 function hash(x, y, seed) {
   let h = (x * 374761393 + y * 668265263 + seed * 69069) | 0;
@@ -137,39 +138,46 @@ export function inkText(g, opts) {
   const widths = chars.map((c) => meter.measureText(c).width);
   const total = widths.reduce((a, b) => a + b, 0) + tracking * Math.max(0, chars.length - 1);
   const pad = Math.ceil(size * 0.42);
-  const w = Math.ceil(total + pad * 2);
-  const h = Math.ceil(size * 1.8 + pad * 2);
-
-  const off = document.createElement("canvas");
-  off.width = Math.max(2, Math.round(w * scale));
-  off.height = Math.max(2, Math.round(h * scale));
-  const og = off.getContext("2d", { willReadFrequently: true });
-  const rng = mulberry32(seed);
   const baseY = pad + size * 1.18;
+  const cacheKey = [text, font, size, color, tracking, seed, scale, baselineJitter].join("|");
+  let off = textCache.get(cacheKey);
+  if (!off) {
+    const w = Math.ceil(total + pad * 2);
+    const h = Math.ceil(size * 1.8 + pad * 2);
+    off = document.createElement("canvas");
+    off.width = Math.max(2, Math.round(w * scale));
+    off.height = Math.max(2, Math.round(h * scale));
+    const og = off.getContext("2d", { willReadFrequently: true });
+    const rng = mulberry32(seed);
 
-  og.scale(scale, scale);
-  og.font = font;
-  og.fillStyle = color;
-  og.textBaseline = "alphabetic";
-  og.textAlign = "left";
+    og.scale(scale, scale);
+    og.font = font;
+    og.fillStyle = color;
+    og.textBaseline = "alphabetic";
+    og.textAlign = "left";
 
-  let cursor = pad;
-  for (let i = 0; i < chars.length; i++) {
-    const ch = chars[i];
-    const jx = (rng() - 0.5) * 0.3;
-    const jy = (rng() - 0.5) * baselineJitter * 2;
-    const a = 0.9 + rng() * 0.1;
-    og.save();
-    og.globalAlpha = a;
-    og.translate(cursor + jx, baseY + jy);
-    og.rotate((rng() - 0.5) * 0.006);
-    og.fillText(ch, 0, 0);
-    og.restore();
-    cursor += widths[i] + tracking;
+    let cursor = pad;
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i];
+      const jx = (rng() - 0.5) * 0.3;
+      const jy = (rng() - 0.5) * baselineJitter * 2;
+      const a = 0.9 + rng() * 0.1;
+      og.save();
+      og.globalAlpha = a;
+      og.translate(cursor + jx, baseY + jy);
+      og.rotate((rng() - 0.5) * 0.006);
+      og.fillText(ch, 0, 0);
+      og.restore();
+      cursor += widths[i] + tracking;
+    }
+
+    og.setTransform(1, 0, 0, 1, 0, 0);
+    applyTextTexture(og, seed);
+    if (textCache.size > 240) {
+      textCache.delete(textCache.keys().next().value);
+    }
+    textCache.set(cacheKey, off);
   }
-
-  og.setTransform(1, 0, 0, 1, 0, 0);
-  applyTextTexture(og, seed);
 
   const x0 = align === "right" ? x - total : align === "center" ? x - total / 2 : x;
   g.save();

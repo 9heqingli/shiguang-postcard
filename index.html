@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>拾光 · 治愈明信片工坊</title>
-  <meta name="description" content="上传或拍下一张照片，生成一张带手绘符号与传统墨色铅字的治愈明信片。全程本地生成。" />
+  <title>拾光 · 明信片风格工坊</title>
+  <meta name="description" content="上传或拍下一张照片，生成治愈明信片或第二世界摄影二创海报。全程本地生成。" />
   <link rel="stylesheet" href="./assets/styles.css" />
 </head>
 <body>
@@ -28,12 +28,22 @@
     <aside class="panel">
       <div class="panel-scroll">
         <section class="intro" id="introBlock">
-          <p class="eyebrow">HEALING POSTCARD · 01</p>
-          <h1>把此刻，<br />留成一页纸。</h1>
+          <p class="eyebrow">POSTCARD STYLE LAB · 01</p>
+          <h1>一张照片，<br />两种世界。</h1>
           <p class="lede">
-            一张真实的照片，一片安静的纸，<br />
-            几枚从画面里拾起的手绘符号。
+            把照片放进安静的纸里，<br />
+            或让照片里的结构长出第二个世界。
           </p>
+          <div class="style-chooser" id="styleIntro" role="group" aria-label="选择明信片风格">
+            <button class="style-option on" type="button" data-style="healing" aria-pressed="true">
+              <span class="style-thumb healing" aria-hidden="true"><i></i><b></b></span>
+              <span class="style-copy"><strong>拾光治愈</strong><em>照片 + 手绘符号</em></span>
+            </button>
+            <button class="style-option" type="button" data-style="second-world" aria-pressed="false">
+              <span class="style-thumb second-world" aria-hidden="true"><i></i><b></b></span>
+              <span class="style-copy"><strong>第二世界</strong><em>3:4 摄影二创</em></span>
+            </button>
+          </div>
           <div class="intro-actions">
             <button class="btn btn-primary" id="pickBtn" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0 4 4m-4-4L8 8M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
@@ -70,6 +80,23 @@
 
           <section class="panel-block">
             <div class="block-head">
+              <h2><span>00</span>风格</h2>
+              <span class="hint" id="styleHint">照片与居中的纸</span>
+            </div>
+            <div class="style-chooser compact" id="styleEditor" role="group" aria-label="当前明信片风格">
+              <button class="style-option on" type="button" data-style="healing" aria-pressed="true">
+                <span class="style-thumb healing" aria-hidden="true"><i></i><b></b></span>
+                <span class="style-copy"><strong>拾光治愈</strong><em>手绘符号</em></span>
+              </button>
+              <button class="style-option" type="button" data-style="second-world" aria-pressed="false">
+                <span class="style-thumb second-world" aria-hidden="true"><i></i><b></b></span>
+                <span class="style-copy"><strong>第二世界</strong><em>摄影二创</em></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="panel-block" id="layoutBlock">
+            <div class="block-head">
               <h2><span>01</span>版式</h2>
               <span class="hint" id="layoutHint">自动</span>
             </div>
@@ -88,7 +115,7 @@
             <div class="swatches" id="paperControl"></div>
           </section>
 
-          <section class="panel-block">
+          <section class="panel-block" id="symbolBlock">
             <div class="block-head">
               <h2><span>03</span>手绘符号</h2>
               <span class="hint"><b id="symbolCount">0</b> / 8</span>
@@ -107,7 +134,19 @@
             </div>
           </section>
 
-          <section class="panel-block">
+          <section class="panel-block" id="worldBlock" hidden>
+            <div class="block-head">
+              <h2><span>03</span>第二世界</h2>
+              <span class="hint" id="worldHint">一页小世界</span>
+            </div>
+            <p class="block-note" id="worldDescription"></p>
+            <button class="mini-btn" id="worldShuffleBtn" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7M21 16v5h-5M14 14l7 7M3 8V3h5M10 10 3 3"/></svg>
+              换一个动作
+            </button>
+          </section>
+
+          <section class="panel-block" id="inkBlock">
             <div class="block-head">
               <h2><span>04</span>字色</h2>
               <span class="hint" id="inkHint">MUJI 红</span>
@@ -119,16 +158,20 @@
           <section class="panel-block">
             <div class="block-head">
               <h2><span>05</span>文案</h2>
-              <span class="hint">可留空</span>
+              <span class="hint" id="copyHint">可留空</span>
             </div>
             <div class="fields">
-              <label class="field">
+              <label class="field" id="titleField">
                 <span>标题</span>
                 <input id="titleInput" type="text" maxlength="28" autocomplete="off" placeholder="A QUIET MOMENT" />
               </label>
-              <label class="field">
+              <label class="field" id="subtitleField">
                 <span>副题</span>
                 <input id="subtitleInput" type="text" maxlength="34" autocomplete="off" placeholder="光落在桌面上" />
+              </label>
+              <label class="field" id="captionField" hidden>
+                <span>英文旁白</span>
+                <input id="captionInput" type="text" maxlength="60" autocomplete="off" placeholder="The water kept the sky for me." />
               </label>
               <div class="field-pair">
                 <label class="field">
@@ -194,7 +237,7 @@
           <div class="stage-actions">
             <button class="mini-btn" id="shuffleBtn" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7M21 16v5h-5M14 14l7 7M3 8V3h5M10 10 3 3"/></svg>
-              换一组
+              <span id="shuffleLabel">换一组</span>
             </button>
             <button class="mini-btn" id="stageDownloadBtn" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
@@ -235,12 +278,12 @@
       </button>
     </div>
     <div class="help-body">
-      <p>这是「治愈明信片式」编辑设计：一半是未被修饰的真实照片，另一半是留白的纸、白色手绘象形符号，以及一行行像旧式印刷机压出来的深色文字。</p>
+      <p>这是两种从同一张照片长出来的编辑设计：一种是「拾光治愈」，照片配白色手绘符号与深色铅字；另一种是「第二世界」，3:4 竖版照片在底部溶进纸面，再用极简黑线与小人打开一个平行小世界。</p>
       <ul>
         <li>照片只做裁切与适配，不重绘、不换色、不添加原图没有的东西。</li>
-        <li>符号最多 8 枚，彼此独立，尺度克制，占纸面约三到四成。</li>
-        <li>墨色文字至少两处：左上角档案标签，右下角地点与日期。</li>
-        <li>纸面是中等明度的暖灰，白色笔触才有呼吸感。</li>
+        <li>拾光治愈最多保留 8 枚符号；第二世界使用少量黑线与 0–3 位线稿小人。</li>
+        <li>第二世界的照片满版顶到上、左、右三边，底部与纸面柔和溶解，不画分界线。</li>
+        <li>换一个世界会重新选择照片里的可互动结构、动作和英文旁白。</li>
       </ul>
       <p class="help-foot">本应用用 Canvas 在本机完成排版与纹理渲染，照片不会上传。识别为轻量视觉估算，符号可以随时手动调整。</p>
     </div>

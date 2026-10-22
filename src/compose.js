@@ -6,6 +6,7 @@ import {
   measureText,
   paperTexture,
 } from "./ink.js";
+import { renderSecondWorld, SECOND_WORLD_SPEC } from "./secondWorld.js";
 import { SYMBOLS, mulberry32, symbolAspect } from "./symbols.js";
 
 const SPECS = {
@@ -47,7 +48,8 @@ const SPECS = {
   },
 };
 
-export function specFor(analysis, layout) {
+export function specFor(analysis, layout, style = "healing") {
+  if (style === "second-world") return SECOND_WORLD_SPEC;
   const o = analysis?.orientation ?? "landscape";
   if (layout === "left-right") {
     if (o === "portrait") return SPECS.leftPortrait;
@@ -286,7 +288,8 @@ function layoutSymbols(spec, symbols, zones, seed) {
 export function renderPoster(canvas, state, options = {}) {
   const { analysis, img } = state;
   if (!analysis || !img) return null;
-  const spec = specFor(analysis, state.layout);
+  if (state.style === "second-world") return renderSecondWorld(canvas, state, options);
+  const spec = specFor(analysis, state.layout, state.style);
   const scale = options.scale ?? state.scale ?? 2;
   const dpr = 1;
   canvas.width = Math.round(spec.w * scale * dpr);
