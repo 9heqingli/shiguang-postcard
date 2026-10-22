@@ -283,11 +283,11 @@ function layoutSymbols(spec, symbols, zones, seed) {
   return { placed, family };
 }
 
-export function renderPoster(canvas, state) {
+export function renderPoster(canvas, state, options = {}) {
   const { analysis, img } = state;
   if (!analysis || !img) return null;
   const spec = specFor(analysis, state.layout);
-  const scale = state.scale ?? 2;
+  const scale = options.scale ?? state.scale ?? 2;
   const dpr = 1;
   canvas.width = Math.round(spec.w * scale * dpr);
   canvas.height = Math.round(spec.h * scale * dpr);

@@ -848,6 +848,12 @@ svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width:
   gap: 20px;
 }
 
+.sheet-head .icon-btn {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+}
+
 .sheet-head h2 {
   margin: 0;
   font-family: var(--display);

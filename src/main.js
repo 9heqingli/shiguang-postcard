@@ -15,6 +15,9 @@ const $ = (sel) => document.querySelector(sel);
 const canvas = $("#poster");
 const fileInput = $("#fileInput");
 const cameraInput = $("#cameraInput");
+const PREVIEW_SCALE = 1;
+const EXPORT_SCALE = 2;
+const PREVIEW_DELAY = 45;
 
 const state = {
   img: null,
@@ -37,7 +40,9 @@ const state = {
     code: "NO. 001",
   },
   seed: Math.floor(Math.random() * 100000),
-  scale: 2,
+  scale: EXPORT_SCALE,
+  previewScale: PREVIEW_SCALE,
+  exportScale: EXPORT_SCALE,
   meta: null,
 };
 
@@ -54,8 +59,10 @@ const INKS = [
   { hex: "#302D2B", name: "玄色", en: "charcoal black" },
 ];
 
-let renderQueued = false;
+let renderTimer = null;
+let renderDeferred = false;
 let renderPending = false;
+let exportInProgress = false;
 let toastTimer = null;
 let inputTimer = null;
 
@@ -153,12 +160,14 @@ function fillTextFields() {
 
 function previewCanvas(key, size, seed) {
   const c = document.createElement("canvas");
-  c.width = size * 2;
-  c.height = size * 2;
+  const dpr = 2;
+  c.width = size * dpr;
+  c.height = size * dpr;
   const g = c.getContext("2d");
+  g.scale(dpr, dpr);
   g.fillStyle = PAPERS[state.paper]?.base || "#d8cebd";
-  g.fillRect(0, 0, c.width, c.height);
-  drawSymbolInk(g, key, { x: size * 0.08, y: size * 0.08, w: size * 0.84, h: size * 0.84 }, seed, 2);
+  g.fillRect(0, 0, size, size);
+  drawSymbolInk(g, key, { x: size * 0.08, y: size * 0.08, w: size * 0.84, h: size * 0.84 }, seed, dpr);
   return c;
 }
 
@@ -209,6 +218,7 @@ function openLibrary() {
   const dialog = $("#libraryDialog");
   const grid = $("#libraryGrid");
   if (!grid.childElementCount) {
+    const fragment = document.createDocumentFragment();
     SYMBOL_KEYS.forEach((key) => {
       const def = SYMBOLS[key];
       const btn = document.createElement("button");
@@ -237,8 +247,9 @@ function openLibrary() {
         scheduleRender();
         toast(`已加入「${def.zh}」`);
       });
-      grid.appendChild(btn);
+      fragment.appendChild(btn);
     });
+    grid.appendChild(fragment);
   }
   updateLibraryAdded();
   dialog.showModal();
@@ -257,38 +268,56 @@ function updateMeta() {
   $("#stageBar").hidden = false;
   $("#analysisStrip").hidden = false;
   $("#metaLayout").textContent = spec.name;
-  $("#metaSize").textContent = `${spec.w * state.scale} × ${spec.h * state.scale}`;
+  const exportScale = state.exportScale ?? state.scale ?? EXPORT_SCALE;
+  $("#metaSize").textContent = `${spec.w * exportScale} × ${spec.h * exportScale}`;
   $("#metaPaper").textContent = PAPERS[state.paper]?.name || "";
   $("#analysisStrip").innerHTML =
     `<span>SCENE <b>${state.analysis.sceneLabel}</b></span><i></i>` +
     `<span>${n} SYMBOLS</span><i></i>` +
     `<span>${PAPERS[state.paper]?.name || ""}</span><i></i>` +
     `<span>LOCAL RENDER</span>`;
-  $("#exportHint").textContent = `${spec.w * state.scale} px 长边`;
+  $("#exportHint").textContent = `${spec.w * exportScale} px 长边`;
   $("#sourceDims").textContent = `${state.analysis.width} × ${state.analysis.height}`;
 }
 
-function scheduleRender() {
+function activeDialog() {
+  return document.querySelector("dialog[open]");
+}
+
+function scheduleRender(options = {}) {
   if (!state.analysis) return;
-  if (renderQueued) return;
-  renderQueued = true;
-  requestAnimationFrame(() => {
-    renderQueued = false;
-    if (renderPending) return;
-    renderPending = true;
-    setBusy(true);
-    try {
-      state.meta = renderPoster(canvas, state);
-      canvas.classList.remove("is-empty");
-      updateMeta();
-    } catch (err) {
-      console.error(err);
-      toast("生成时出了点问题，请换一张照片试试");
-    } finally {
-      renderPending = false;
-      setBusy(false);
+  if (activeDialog()) {
+    renderDeferred = true;
+    return;
+  }
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(runRender, options.immediate ? 0 : PREVIEW_DELAY);
+}
+
+function runRender() {
+  if (!state.analysis || activeDialog()) {
+    renderDeferred = Boolean(state.analysis);
+    return;
+  }
+  if (renderPending) {
+    renderDeferred = true;
+    return;
+  }
+  renderPending = true;
+  try {
+    state.meta = renderPoster(canvas, state, { scale: PREVIEW_SCALE });
+    canvas.classList.remove("is-empty");
+    updateMeta();
+  } catch (err) {
+    console.error(err);
+    toast("生成时出了点问题，请换一张照片试试");
+  } finally {
+    renderPending = false;
+    if (renderDeferred) {
+      renderDeferred = false;
+      scheduleRender({ immediate: true });
     }
-  });
+  }
 }
 
 /* ----------------------------------------------------------------------- */
@@ -386,26 +415,50 @@ function download() {
     toast("先选一张照片吧");
     return;
   }
-  canvas.toBlob((blob) => {
-    if (!blob) {
-      toast("导出失败，请再试一次");
-      return;
-    }
-    const stamp = new Date();
-    const pad = (n) => String(n).padStart(2, "0");
-    const name = `拾光明信片-${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}-${pad(
-      stamp.getHours()
-    )}${pad(stamp.getMinutes())}.png`;
-    const a = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
-    toast("明信片已保存");
-  }, "image/png");
+  if (exportInProgress) return;
+  exportInProgress = true;
+  setBusy(true);
+  toast("正在生成高清明信片…", 8000);
+
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      try {
+        state.meta = renderPoster(canvas, state, { scale: EXPORT_SCALE });
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            toast("导出失败，请再试一次");
+            finishExport();
+            return;
+          }
+          const stamp = new Date();
+          const pad = (n) => String(n).padStart(2, "0");
+          const name = `拾光明信片-${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(
+            stamp.getDate()
+          )}-${pad(stamp.getHours())}${pad(stamp.getMinutes())}.png`;
+          const a = document.createElement("a");
+          const url = URL.createObjectURL(blob);
+          a.href = url;
+          a.download = name;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1500);
+          toast("明信片已保存");
+          finishExport();
+        }, "image/png");
+      } catch (err) {
+        console.error(err);
+        toast("导出失败，请再试一次");
+        finishExport();
+      }
+    }, 0);
+  });
+}
+
+function finishExport() {
+  exportInProgress = false;
+  setBusy(false);
+  scheduleRender({ immediate: true });
 }
 
 async function copyPrompt() {
@@ -481,12 +534,23 @@ $("#resetBtn").addEventListener("click", reset);
 $("#helpBtn").addEventListener("click", () => $("#helpDialog").showModal());
 
 document.querySelectorAll("dialog [data-close]").forEach((btn) => {
-  btn.addEventListener("click", () => btn.closest("dialog").close());
+  btn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const dialog = btn.closest("dialog");
+    if (dialog?.open) dialog.close();
+  });
 });
 
 document.querySelectorAll("dialog").forEach((dialog) => {
   dialog.addEventListener("click", (e) => {
-    if (e.target === dialog) dialog.close();
+    if (e.target === dialog && dialog.open) dialog.close();
+  });
+  dialog.addEventListener("close", () => {
+    if (renderDeferred) {
+      renderDeferred = false;
+      scheduleRender({ immediate: true });
+    }
   });
 });
 
