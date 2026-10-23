@@ -6,6 +6,7 @@ import {
   measureText,
   paperTexture,
 } from "./ink.js";
+import { memoryArchiveSpec, renderMemoryArchive } from "./memoryArchive.js";
 import { renderSecondWorld, SECOND_WORLD_SPEC } from "./secondWorld.js";
 import { SYMBOLS, mulberry32, symbolAspect } from "./symbols.js";
 
@@ -50,6 +51,7 @@ const SPECS = {
 
 export function specFor(analysis, layout, style = "healing") {
   if (style === "second-world") return SECOND_WORLD_SPEC;
+  if (style === "memory-archive") return memoryArchiveSpec(analysis);
   const o = analysis?.orientation ?? "landscape";
   if (layout === "left-right") {
     if (o === "portrait") return SPECS.leftPortrait;
@@ -289,6 +291,7 @@ export function renderPoster(canvas, state, options = {}) {
   const { analysis, img } = state;
   if (!analysis || !img) return null;
   if (state.style === "second-world") return renderSecondWorld(canvas, state, options);
+  if (state.style === "memory-archive") return renderMemoryArchive(canvas, state, options);
   const spec = specFor(analysis, state.layout, state.style);
   const scale = options.scale ?? state.scale ?? 2;
   const dpr = 1;

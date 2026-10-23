@@ -28,6 +28,44 @@ const SECOND_WORLD_EN = {
   ordinary: "an ordinary edge in the photo opens into the paper as a small doorway the figure enters",
 };
 
+const MEMORY_MOTIF_EN = {
+  coast: "a reduced shoreline mass, one broken horizon relationship, and a pale atmospheric wash",
+  water: "a translucent water mass with one or two incomplete ripple relationships",
+  mountain: "two overlapping mountain masses with one retained ridge direction",
+  green: "a canopy pressure and a thin vertical branch relationship",
+  urban: "an incomplete architectural mass with one directional urban rhythm",
+  indoor: "a room-light mass and one quiet table or window relationship",
+  food: "a table-mass relationship and a small translucent vessel form",
+  portrait: "a simplified head-and-shoulder gesture without facial detail",
+  night: "a dark atmospheric mass with one restrained light opening",
+  ordinary: "one incomplete organic mass derived from the photo's main visual pressure",
+};
+
+function buildArchivePrompt(state, analysis) {
+  const archive = state.archive || {};
+  const title = (state.text.title || archive.title || "SMALL PAUSE").trim();
+  const colors = (archive.colors || []).map((entry) => `rgb(${entry.rgb.join(",")})`).join(", ");
+  const motif = MEMORY_MOTIF_EN[archive.key] || MEMORY_MOTIF_EN.ordinary;
+  const anchors = [
+    analysis?.sceneLabel || "quiet everyday scene",
+    `photo orientation: ${analysis?.orientation || "landscape"}`,
+    `dominant memory geometry centered around ${Math.round((analysis?.focus?.x ?? 0.5) * 100)}% horizontal and ${Math.round((analysis?.focus?.y ?? 0.5) * 100)}% vertical`,
+    `source atmosphere tags: ${(analysis?.tags || []).join(", ") || "soft neutral light"}`,
+  ].join("; ");
+
+  return `Create ONE companion memory panel only, with the same aspect ratio as the referenced ${analysis?.orientation || "landscape"} photo. Do not include the original photo. This is the interpretive half of an editorial photo-memory archive diptych.
+
+Core rule: 神似不完全形似. Preserve the memory anchors, but do not make a direct watercolor copy of the photo. Important forms should be incomplete, semi-transparent, reduced, slightly displaced, and poetic: recognizable in spirit, not copied in full shape.
+
+Source memory anchors: ${anchors}. In the companion panel, use ${motif}. Keep one or two source-specific structural relationships perceptible, but do not reproduce every object, outline, window, branch, face, or detailed geometry.
+
+Visual language: refined archival watercolor on lightly textured paper, ${colors ? `source-derived washes near ${colors},` : "source-derived muted washes,"} diluted edges, gentle tonal drift, restrained paper fiber, quiet editorial atmosphere. Primary motif about 42–48% of the panel; total visible load about 60–68%, leaving 32–40% calm paper ground. Do not default to heavy beige; choose a pale paper tint related to the source's atmosphere.
+
+Archive elements must be integrated into this one watercolor page and clearly visible: exactly three small irregular hand-applied watercolor swatches with soft uneven edges, grouped together in quiet paper space and derived from the source colors. Add 3 widely spaced empty low-contrast horizontal journaling lines with no prose. Add one concise, legible handwritten English title exactly: "${title}". Keep the title under 35% of the panel width. The title, swatches, and lines must not cross the main motif or read as detached interface widgets.
+
+No dates, location note, subtitle, caption, tape, mockup, border frame, labels, logos, watermark, or extra text. No literal detail-for-detail watercolor duplicate, no gradients, torn seams, page turns, tape, shadows, or decorative separators.`;
+}
+
 function buildSecondWorldPrompt(state, analysis) {
   const world = state.world || {};
   const worldEn = SECOND_WORLD_EN[world.key] || SECOND_WORLD_EN.ordinary;
@@ -51,6 +89,7 @@ Overall style: real photography, warm neutral paper, lots of breathing room, min
 
 export function buildPrompt(state, analysis, meta) {
   if (state.style === "second-world") return buildSecondWorldPrompt(state, analysis);
+  if (state.style === "memory-archive") return buildArchivePrompt(state, analysis);
   const vertical = state.layout === "left-right";
   const symbols = symbolEnglishList(state.symbols);
   const inventory = symbols.map((s) => `one ${s}`).join(", ");

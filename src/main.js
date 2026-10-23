@@ -8,6 +8,7 @@ import {
 } from "./analysis.js";
 import { renderPoster, specFor } from "./compose.js";
 import { drawSymbolInk } from "./ink.js";
+import { makeArchive } from "./memoryArchive.js";
 import { buildPrompt } from "./prompt.js";
 import { makeWorld } from "./secondWorld.js";
 import { SYMBOLS, SYMBOL_KEYS } from "./symbols.js";
@@ -45,6 +46,9 @@ const state = {
   seed: Math.floor(Math.random() * 100000),
   worldSeed: 0,
   world: null,
+  archiveSeed: 0,
+  archive: null,
+  titles: { healing: "", "memory-archive": "" },
   scale: EXPORT_SCALE,
   previewScale: PREVIEW_SCALE,
   exportScale: EXPORT_SCALE,
@@ -159,25 +163,34 @@ function updateLayoutUI() {
 
 function updateStyleUI() {
   const second = state.style === "second-world";
+  const archive = state.style === "memory-archive";
   document.querySelectorAll("[data-style]").forEach((el) => {
     const on = el.dataset.style === state.style;
     el.classList.toggle("on", on);
     el.setAttribute("aria-pressed", String(on));
   });
-  $("#styleHint").textContent = second ? "3:4 摄影二创" : "照片与居中的纸";
-  $("#layoutBlock").hidden = second;
-  $("#symbolBlock").hidden = second;
-  $("#inkBlock").hidden = second;
+  $("#styleHint").textContent = second ? "3:4 摄影二创" : archive ? "照片 + 水彩记忆页" : "照片与居中的纸";
+  $("#layoutBlock").hidden = second || archive;
+  $("#symbolBlock").hidden = second || archive;
+  $("#inkBlock").hidden = second || archive;
   $("#worldBlock").hidden = !second;
+  $("#archiveBlock").hidden = !archive;
   $("#titleField").hidden = second;
-  $("#subtitleField").hidden = second;
+  $("#subtitleField").hidden = second || archive;
   $("#captionField").hidden = !second;
+  $("#placeDateFields").hidden = archive;
+  $("#titleFieldLabel").textContent = archive ? "英文档案标题" : "标题";
+  $("#titleInput").maxLength = archive ? 36 : 28;
   $("#worldHint").textContent = second ? `${state.world?.label || "一页小世界"} · ${state.world?.figureCount ?? 1} 位使用者` : "";
   $("#worldDescription").textContent = second
     ? "照片底部的结构继续延伸进纸里：水会变成可牵动的涟漪，山路会变成可攀折的脊线，光也会被借走一小段。"
     : "";
-  $("#shuffleLabel").textContent = second ? "换一个世界" : "换一组";
-  $("#copyHint").textContent = second ? "一句英文旁白" : "可留空";
+  $("#archiveHint").textContent = archive ? `${state.text.title || state.archive?.title || "SMALL PAUSE"} · 3 色记忆` : "";
+  $("#archiveDescription").textContent = archive
+    ? "原照片完整保留，另一侧是一整页水彩记忆：留白、手写标题、三枚色块和三行空白的日记线。"
+    : "";
+  $("#shuffleLabel").textContent = second ? "换一个世界" : archive ? "换一页记忆" : "换一组";
+  $("#copyHint").textContent = second ? "一句英文旁白" : archive ? "2–5 个英文词" : "可留空";
 }
 
 function ensureWorld(force = false) {
@@ -191,12 +204,36 @@ function ensureWorld(force = false) {
   }
 }
 
+function ensureArchive(force = false) {
+  if (!state.analysis) return;
+  if (!force && state.archive) return;
+  const previous = state.archive;
+  state.archiveSeed = force ? state.archiveSeed + 1 : state.archiveSeed;
+  state.archive = makeArchive(state.analysis, state.seed + state.archiveSeed * 8269);
+  if (force || !state.text.title || state.text.title === previous?.title) {
+    state.text.title = state.archive.title;
+    state.titles["memory-archive"] = state.archive.title;
+  }
+}
+
 function applyStyle(style) {
-  if (style !== "healing" && style !== "second-world") return;
+  if (!["healing", "second-world", "memory-archive"].includes(style)) return;
+  if (state.style === "healing" || state.style === "memory-archive") {
+    state.titles[state.style] = state.text.title;
+  }
   state.style = style;
   if (style === "second-world" && state.analysis) {
     ensureWorld();
     if (!state.text.caption) state.text.caption = state.world.caption;
+    fillTextFields();
+  }
+  if (style === "memory-archive" && state.analysis) {
+    ensureArchive();
+    state.text.title = state.titles["memory-archive"] || state.archive.title;
+    state.titles["memory-archive"] = state.text.title;
+    fillTextFields();
+  } else if (style === "healing" && state.analysis) {
+    state.text.title = state.titles.healing || state.text.title;
     fillTextFields();
   }
   scrollStageAfterRender = Boolean(state.analysis && window.matchMedia("(max-width: 900px)").matches);
@@ -319,6 +356,7 @@ function updateLibraryAdded() {
 function updateMeta() {
   if (!state.analysis) return;
   const second = state.style === "second-world";
+  const archive = state.style === "memory-archive";
   const spec = specFor(state.analysis, state.layout, state.style);
   const n = state.symbols.length;
   $("#stageBar").hidden = false;
@@ -332,6 +370,11 @@ function updateMeta() {
       `<span>${state.world?.label || "一页小世界"}</span><i></i>` +
       `<span>${PAPERS[state.paper]?.name || ""}</span><i></i>` +
       `<span>LOCAL RENDER</span>`
+    : archive
+      ? `<span>STYLE <b>记忆档案</b></span><i></i>` +
+        `<span>${state.text.title || state.archive?.title || "SMALL PAUSE"}</span><i></i>` +
+        `<span>${PAPERS[state.paper]?.name || ""}</span><i></i>` +
+        `<span>LOCAL RENDER</span>`
     : `<span>SCENE <b>${state.analysis.sceneLabel}</b></span><i></i>` +
       `<span>${n} SYMBOLS</span><i></i>` +
       `<span>${PAPERS[state.paper]?.name || ""}</span><i></i>` +
@@ -420,6 +463,11 @@ async function handleFile(file) {
     state.worldSeed = 0;
     state.world = makeWorld(state.analysis, state.seed);
     state.text.caption = state.world.caption;
+    state.archiveSeed = 0;
+    state.archive = makeArchive(state.analysis, state.seed);
+    state.titles.healing = state.text.title;
+    state.titles["memory-archive"] = state.archive.title;
+    if (state.style === "memory-archive") state.text.title = state.archive.title;
 
     $("#emptyState").hidden = true;
     $("#introBlock").hidden = true;
@@ -467,6 +515,9 @@ function reset() {
   state.symbols = [];
   state.world = null;
   state.worldSeed = 0;
+  state.archive = null;
+  state.archiveSeed = 0;
+  state.titles = { healing: "", "memory-archive": "" };
   state.text = {
     kicker: "POCKET ARCHIVE",
     title: "",
@@ -602,9 +653,19 @@ $("#shuffleBtn").addEventListener("click", () => {
   if (state.style === "second-world") {
     ensureWorld(true);
     fillTextFields();
+    updateStyleUI();
     scheduleRender({ immediate: true });
     updateMeta();
     toast("换了一个第二世界");
+    return;
+  }
+  if (state.style === "memory-archive") {
+    ensureArchive(true);
+    fillTextFields();
+    updateStyleUI();
+    scheduleRender({ immediate: true });
+    updateMeta();
+    toast("换了一页记忆");
     return;
   }
   state.seed = (state.seed + 3571) % 1000000;
@@ -618,9 +679,20 @@ $("#worldShuffleBtn").addEventListener("click", () => {
   if (!state.analysis) return;
   ensureWorld(true);
   fillTextFields();
+  updateStyleUI();
   scheduleRender({ immediate: true });
   updateMeta();
   toast("换了一个第二世界");
+});
+
+$("#archiveShuffleBtn").addEventListener("click", () => {
+  if (!state.analysis) return;
+  ensureArchive(true);
+  fillTextFields();
+  updateStyleUI();
+  scheduleRender({ immediate: true });
+  updateMeta();
+  toast("换了一页记忆");
 });
 
 $("#libraryBtn").addEventListener("click", openLibrary);
@@ -655,6 +727,9 @@ const bindText = (id, key) => {
   const el = $(id);
   el.addEventListener("input", () => {
     state.text[key] = el.value;
+    if (key === "title" && (state.style === "healing" || state.style === "memory-archive")) {
+      state.titles[state.style] = el.value;
+    }
     clearTimeout(inputTimer);
     inputTimer = setTimeout(scheduleRender, 140);
   });

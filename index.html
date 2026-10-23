@@ -43,6 +43,10 @@
               <span class="style-thumb second-world" aria-hidden="true"><i></i><b></b></span>
               <span class="style-copy"><strong>第二世界</strong><em>3:4 摄影二创</em></span>
             </button>
+            <button class="style-option" type="button" data-style="memory-archive" aria-pressed="false">
+              <span class="style-thumb memory-archive" aria-hidden="true"><i></i><b></b></span>
+              <span class="style-copy"><strong>记忆档案</strong><em>照片 + 水彩页</em></span>
+            </button>
           </div>
           <div class="intro-actions">
             <button class="btn btn-primary" id="pickBtn" type="button">
@@ -91,6 +95,10 @@
               <button class="style-option" type="button" data-style="second-world" aria-pressed="false">
                 <span class="style-thumb second-world" aria-hidden="true"><i></i><b></b></span>
                 <span class="style-copy"><strong>第二世界</strong><em>摄影二创</em></span>
+              </button>
+              <button class="style-option" type="button" data-style="memory-archive" aria-pressed="false">
+                <span class="style-thumb memory-archive" aria-hidden="true"><i></i><b></b></span>
+                <span class="style-copy"><strong>记忆档案</strong><em>水彩双联</em></span>
               </button>
             </div>
           </section>
@@ -146,6 +154,18 @@
             </button>
           </section>
 
+          <section class="panel-block" id="archiveBlock" hidden>
+            <div class="block-head">
+              <h2><span>03</span>记忆档案</h2>
+              <span class="hint" id="archiveHint">SMALL PAUSE · 3 色记忆</span>
+            </div>
+            <p class="block-note" id="archiveDescription"></p>
+            <button class="mini-btn" id="archiveShuffleBtn" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7M21 16v5h-5M14 14l7 7M3 8V3h5M10 10 3 3"/></svg>
+              换一页记忆
+            </button>
+          </section>
+
           <section class="panel-block" id="inkBlock">
             <div class="block-head">
               <h2><span>04</span>字色</h2>
@@ -162,7 +182,7 @@
             </div>
             <div class="fields">
               <label class="field" id="titleField">
-                <span>标题</span>
+                <span id="titleFieldLabel">标题</span>
                 <input id="titleInput" type="text" maxlength="28" autocomplete="off" placeholder="A QUIET MOMENT" />
               </label>
               <label class="field" id="subtitleField">
@@ -173,7 +193,7 @@
                 <span>英文旁白</span>
                 <input id="captionInput" type="text" maxlength="60" autocomplete="off" placeholder="The water kept the sky for me." />
               </label>
-              <div class="field-pair">
+              <div class="field-pair" id="placeDateFields">
                 <label class="field">
                   <span>地点</span>
                   <input id="placeInput" type="text" maxlength="20" autocomplete="off" placeholder="HERE" />
@@ -278,12 +298,12 @@
       </button>
     </div>
     <div class="help-body">
-      <p>这是两种从同一张照片长出来的编辑设计：一种是「拾光治愈」，照片配白色手绘符号与深色铅字；另一种是「第二世界」，3:4 竖版照片在底部溶进纸面，再用极简黑线与小人打开一个平行小世界。</p>
+      <p>这是三种从同一张照片长出来的编辑设计：「拾光治愈」用白色手绘符号与深色铅字；「第二世界」让照片底部溶进纸面，再用极简黑线与小人打开一个平行小世界；「记忆档案」保留原照片，用另一侧完整的水彩页承载标题、三枚色块和空白日记线。</p>
       <ul>
         <li>照片只做裁切与适配，不重绘、不换色、不添加原图没有的东西。</li>
         <li>拾光治愈最多保留 8 枚符号；第二世界使用少量黑线与 0–3 位线稿小人。</li>
         <li>第二世界的照片满版顶到上、左、右三边，底部与纸面柔和溶解，不画分界线。</li>
-        <li>换一个世界会重新选择照片里的可互动结构、动作和英文旁白。</li>
+        <li>记忆档案不重绘原照片，水彩页只保留照片的少量结构和色彩记忆。</li>
       </ul>
       <p class="help-foot">本应用用 Canvas 在本机完成排版与纹理渲染，照片不会上传。识别为轻量视觉估算，符号可以随时手动调整。</p>
     </div>
